@@ -11,16 +11,16 @@ def make_paired_samples(rna, protein, sample_nums=15000, celltype='celltype'):
     rna_ids = rna_ids.reset_index()
     protein_ids = protein.obs[celltype].reset_index()
 
-    print(f"Counts of all celltype:\n {protein_ids.groupby('celltype').count().rename(columns={'index': 'count'})}")
+    print(f"Counts of all celltype:\n {protein_ids.groupby(celltype).count().rename(columns={'index': 'count'})}")
 
     if (len(protein_ids[protein_ids.duplicated()]) != 0) | (len(rna_ids[rna_ids.duplicated()]) != 0):
         print("There are duplicated ids in protein or rna!!!")
 
     combine_df = pd.merge(rna_ids, protein_ids, how='cross')
-    combine_df['label'] = (combine_df['celltype_x'].astype(str) == combine_df['celltype_y'].astype(str)).astype(int)
-    combine_df_pos = combine_df[combine_df['label'] == 1].groupby(['celltype_y'], group_keys=False).apply(
+    combine_df['label'] = (combine_df[f'{celltype}_x'].astype(str) == combine_df[f'{celltype}_y'].astype(str)).astype(int)
+    combine_df_pos = combine_df[combine_df['label'] == 1].groupby([f'{celltype}_y'], group_keys=False).apply(
         lambda x: x.sample(min(sample_nums, len(x))))
-    combine_df_neg = combine_df[combine_df['label'] == 0].groupby(['celltype_y'], group_keys=False).apply(
+    combine_df_neg = combine_df[combine_df['label'] == 0].groupby([f'{celltype}_y'], group_keys=False).apply(
         lambda x: x.sample(min(sample_nums, len(x))))
     print(f"neg_samples:{combine_df_neg.shape[0]}, pos_samples:{combine_df_pos.shape[0]}")
     sample_df = pd.concat([combine_df_pos, combine_df_neg])
@@ -76,6 +76,24 @@ def make_scInfer_dataset(rna, protein, sample_df, rna_vars='highly_variable', pr
     valid_dataset = scDataset(protein_df, rna_df, valid_relation)
     return train_dataset, valid_dataset, rna_df, protein_df
 
+def make_scInfer_dataframe(rna, protein, rna_vars='highly_variable', protein_vars=None):
+    rna_df = rna[:, rna.var[rna_vars]].to_df()
+    if protein_vars:
+        protein_df = protein[:, protein.var[protein_vars] > 0].to_df()
+    else:
+        protein_df = protein.to_df()
+
+    protein_df = min_max(protein_df)
+    rna_df = min_max(rna_df)
+    protein_df.fillna(0, inplace=True)
+    rna_df.fillna(0, inplace=True)
+    return rna_df, protein_df
+
+def make_unlabeled_dataframe(rna, unlabeled_rna, rna_vars='highly_variable'):
+    unlabeled_rna_df = unlabeled_rna[:, rna.var[rna_vars]].to_df()
+    unlabeled_rna_df = min_max(unlabeled_rna_df)
+    unlabeled_rna_df.fillna(0, inplace=True)
+    return unlabeled_rna_df
 
 class scDatasetPred(data.Dataset):
     def __init__(self, scms_df):
@@ -144,7 +162,7 @@ def train_embeddings(num_epochs, optimizer, device, model, criterion, train_load
 
 
 
-def make_embeddings(model, device, rna_df, protein_df, rna, protein, celltype_key = 'celltype'):
+def make_embeddings(model, device, rna_df, protein_df, rna, protein, celltype = 'celltype'):
     protein_ds = scDatasetPred(protein_df)
     protein_loader = torch.utils.data.DataLoader(
         protein_ds,
@@ -168,11 +186,11 @@ def make_embeddings(model, device, rna_df, protein_df, rna, protein, celltype_ke
 
     protein_em_ann = ad.AnnData(X=protein_em.cpu().detach().numpy())
     protein_em_ann.obs_names = protein.obs_names.tolist()
-    protein_em_ann.obs['celltype'] = protein.obs['celltype'].tolist()
+    protein_em_ann.obs[celltype] = protein.obs[celltype].tolist()
 
     rna_em_ann = ad.AnnData(X=rna_em.cpu().detach().numpy())
     rna_em_ann.obs_names = rna.obs_names.tolist()
-    rna_em_ann.obs['celltype'] = rna.obs['celltype'].tolist()
+    rna_em_ann.obs[celltype] = rna.obs[celltype].tolist()
 
     return rna_em_ann, protein_em_ann
 
