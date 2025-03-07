@@ -108,9 +108,9 @@ class scDatasetPred(data.Dataset):
 
 def train_embeddings(num_epochs, optimizer, device, model, criterion, train_loader, test_loader, patience=10, decline_rate = 0.9):
     train_loss_lst, test_loss_lst = [], []
-    patience = 10  # 允许的未改善epoch数量
-    best_test_loss = float('inf')  # 初始化最佳测试损失
-    patience_counter = 0  # 初始化未改善计数器
+    patience = 10
+    best_test_loss = float('inf')
+    patience_counter = 0
     for epoch in range(num_epochs):
         train_loss = 0
         if epoch % 10 == 0:
@@ -135,24 +135,24 @@ def train_embeddings(num_epochs, optimizer, device, model, criterion, train_load
             protein_tmp_embedding, rna_tmp_embedding = model(protein_tmp, rna_tmp)
             loss = criterion(protein_tmp_embedding, rna_tmp_embedding, label)
 
-            # 记录总损失
+
             test_loss += loss.item()
-        # 打印平均损失
+
         avg_train_loss = train_loss / len(train_loader.dataset)
         avg_test_loss = test_loss / len(test_loader.dataset)
         print(
             f'epoch:{epoch}| Train Loss: {train_loss / len(train_loader.dataset)} | Test Loss: {test_loss / len(test_loader.dataset)}', )
         train_loss_lst.append(train_loss / len(train_loader.dataset))
         test_loss_lst.append(test_loss / len(test_loader.dataset))
-        # 早停逻辑
+
         if avg_test_loss < best_test_loss:
             best_test_loss = avg_test_loss
-            patience_counter = 0  # 重置计数器
+            patience_counter = 0
         else:
-            patience_counter += 1  # 增加计数器
+            patience_counter += 1
             if patience_counter >= patience:
                 print(f'Early stopping at epoch {epoch}. Best Test Loss: {best_test_loss:.6f}')
-                break  # 停止训练
+                break
         model.train()
     model.eval()
     loss_df = pd.DataFrame(train_loss_lst, columns=['train_loss'])
@@ -298,8 +298,8 @@ def make_infer_dataset(rna_hv, screen_num, protein, valid_ratio=0.3):
 def train_infer(train_loader, test_loader, model, criterion, num_epochs, patience, optimizer, batch_size, device, decline_ratio=0.9):
     train_loss_lst, test_loss_lst = [], []
     print(f'model: {model.name} | lr: {optimizer.param_groups[0]["lr"]} | batch_size: {batch_size}')
-    best_test_loss = float('inf')  # 初始化最佳测试损失
-    patience_counter = 0  # 初始化未改善计数器
+    best_test_loss = float('inf')
+    patience_counter = 0
     for epoch in range(num_epochs):
         if epoch % 10 == 0:
             optimizer.param_groups[0]['lr'] *= decline_ratio
@@ -325,24 +325,24 @@ def train_infer(train_loader, test_loader, model, criterion, num_epochs, patienc
             fusion_x = model(protein_tmp)
             loss = criterion(fusion_x, label)
 
-            # 记录总损失
+
             test_loss += loss.item()
-        # 打印平均损失
+
         avg_train_loss = train_loss / len(train_loader.dataset)
         avg_test_loss = test_loss / len(test_loader.dataset)
         print(
             f'epoch:{epoch}| Train Loss: {train_loss / len(train_loader.dataset)} | Test Loss: {test_loss / len(test_loader.dataset)}', )
         train_loss_lst.append(train_loss / len(train_loader.dataset))
         test_loss_lst.append(test_loss / len(test_loader.dataset))
-        # 早停逻辑
+
         if avg_test_loss < best_test_loss:
             best_test_loss = avg_test_loss
-            patience_counter = 0  # 重置计数器
+            patience_counter = 0
         else:
-            patience_counter += 1  # 增加计数器
+            patience_counter += 1
             if patience_counter >= patience:
                 print(f'Early stopping at epoch {epoch}. Best Test Loss: {best_test_loss:.6f}')
-                break  # 停止训练
+                break
         model.train()
     model.eval()
     loss_df = pd.DataFrame(train_loss_lst, columns=['train_loss'])
