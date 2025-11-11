@@ -5,6 +5,7 @@ from sklearn.model_selection import train_test_split
 import anndata as ad
 import scanpy as sc
 from sklearn.metrics.pairwise import cosine_similarity
+from tqdm import tqdm
 
 def make_paired_samples(rna, protein, sample_nums=15000, celltype='celltype'):
     rna_ids = rna.obs[celltype]
@@ -28,6 +29,47 @@ def make_paired_samples(rna, protein, sample_nums=15000, celltype='celltype'):
 
     return sample_df
 
+def make_rna_prt_index(rna, protein, celltype='celltype'):
+    rna_ids = rna.obs[celltype]
+    rna_ids = rna_ids.reset_index()
+    protein_ids = protein.obs[celltype].reset_index()
+    print(
+        f"Counts of all celltype in rna:\n {rna_ids.groupby(celltype).count().rename(columns={'index': 'count'})}")
+    print(f"Counts of all celltype in protein:\n {protein_ids.groupby(celltype).count().rename(columns={'index': 'count'})}")
+    return rna_ids, protein_ids
+
+def make_train_test_id(ids, by='celltype', test_frac = 0.3):
+    def split_group(group, fraction=0.3):
+        # 打乱每个分组的数据
+        group = group.sample(frac=1, random_state=1).reset_index(drop=True)
+        # 计算分割点
+        split_point = int(len(group) * fraction)
+        # 分割数据
+        group_test = group[:split_point]
+        group_train = group[split_point:]
+        return group_test, group_train
+    grouped = ids.groupby(by)
+    group_test_lst, group_train_lst = [], []
+    for name, group in grouped:
+        g_test, g_train = split_group(group, test_frac)
+        group_test_lst.append(g_test)
+        group_train_lst.append(g_train)
+    test_id = pd.concat(group_test_lst).reset_index(drop=True)
+    train_id = pd.concat(group_train_lst).reset_index(drop=True)
+    return train_id, test_id
+
+def make_paired_samples_for_benchmark(rna_ids, protein_ids, celltype, sample_nums):
+    combine_df = pd.merge(rna_ids, protein_ids, how='cross')
+    combine_df['label'] = (combine_df[f'{celltype}_x'].astype(str) == combine_df[f'{celltype}_y'].astype(str)).astype(int)
+    combine_df_pos = combine_df[combine_df['label'] == 1].groupby([f'{celltype}_y'], group_keys=False).apply(
+        lambda x: x.sample(min(sample_nums, len(x))))
+    combine_df_neg = combine_df[combine_df['label'] == 0].groupby([f'{celltype}_y'], group_keys=False).apply(
+        lambda x: x.sample(min(sample_nums, len(x))))
+    print(f"neg_samples:{combine_df_neg.shape[0]}, pos_samples:{combine_df_pos.shape[0]}")
+    sample_df = pd.concat([combine_df_pos, combine_df_neg])
+    sample_df = sample_df[['index_x', 'index_y', 'label']]
+
+    return sample_df
 
 class scDataset(data.Dataset):
     def __init__(self, protein_df, rna_df, relations):
@@ -106,16 +148,17 @@ class scDatasetPred(data.Dataset):
     def __len__(self):
         return len(self.scms_data)
 
-def train_embeddings(num_epochs, optimizer, device, model, criterion, train_loader, test_loader, patience=10, decline_rate = 0.9):
+def train_embeddings(num_epochs, optimizer, device, model, criterion, train_loader, test_loader, patience=10, decline_rate = 0.9, plot_line=False):
     train_loss_lst, test_loss_lst = [], []
-    patience = 10
+    pbar_epochs = tqdm(range(num_epochs), desc="Training", unit="epoch")
     best_test_loss = float('inf')
     patience_counter = 0
-    for epoch in range(num_epochs):
+
+    for epoch in pbar_epochs:
         train_loss = 0
         if epoch % 10 == 0:
             optimizer.param_groups[0]['lr'] *= decline_rate
-            print(f'lr: {optimizer.param_groups[0]["lr"]:.6f}')
+            # print(f'lr: {optimizer.param_groups[0]["lr"]:.6f}')
         for protein_tmp, rna_tmp, label in train_loader:
             protein_tmp, rna_tmp, label = protein_tmp.to(device), rna_tmp.to(device), label.to(device)
 
@@ -140,10 +183,16 @@ def train_embeddings(num_epochs, optimizer, device, model, criterion, train_load
 
         avg_train_loss = train_loss / len(train_loader.dataset)
         avg_test_loss = test_loss / len(test_loader.dataset)
-        print(
-            f'epoch:{epoch}| Train Loss: {train_loss / len(train_loader.dataset)} | Test Loss: {test_loss / len(test_loader.dataset)}', )
+        # print(
+        #     f'epoch:{epoch}| Train Loss: {train_loss / len(train_loader.dataset)} | Test Loss: {test_loss / len(test_loader.dataset)}', )
         train_loss_lst.append(train_loss / len(train_loader.dataset))
         test_loss_lst.append(test_loss / len(test_loader.dataset))
+        # 更新进度条显示信息
+        pbar_epochs.set_postfix({
+            'train_loss': f'{avg_train_loss:.10f}',
+            'test_loss': f'{avg_test_loss:.10f}',
+            'lr': f'{optimizer.param_groups[0]["lr"]:.6f}'
+        })
 
         if avg_test_loss < best_test_loss:
             best_test_loss = avg_test_loss
@@ -154,10 +203,12 @@ def train_embeddings(num_epochs, optimizer, device, model, criterion, train_load
                 print(f'Early stopping at epoch {epoch}. Best Test Loss: {best_test_loss:.6f}')
                 break
         model.train()
+    pbar_epochs.close()
     model.eval()
     loss_df = pd.DataFrame(train_loss_lst, columns=['train_loss'])
     loss_df['test_loss'] = test_loss_lst
-    loss_df.plot()
+    if plot_line:
+        loss_df.plot()
     return model
 
 
@@ -266,25 +317,25 @@ class scInferDataset(data.Dataset):
         return self.protein_data.shape[1]
 
 
-def make_train_test_id(ids, by='celltype', test_frac=0.2):
-    def split_group(group, fraction=0.3):
-        group = group.sample(frac=1, random_state=1).reset_index(drop=True)
-
-        split_point = int(len(group) * fraction)
-
-        group_test = group[:split_point]
-        group_train = group[split_point:]
-        return group_test, group_train
-
-    grouped = ids.groupby(by)
-    group_test_lst, group_train_lst = [], []
-    for name, group in grouped:
-        g_test, g_train = split_group(group, test_frac)
-        group_test_lst.append(g_test)
-        group_train_lst.append(g_train)
-    test_id = pd.concat(group_test_lst).reset_index(drop=True)
-    train_id = pd.concat(group_train_lst).reset_index(drop=True)
-    return test_id, train_id
+# def make_train_test_id(ids, by='celltype', test_frac=0.2):
+#     def split_group(group, fraction=0.3):
+#         group = group.sample(frac=1, random_state=1).reset_index(drop=True)
+#
+#         split_point = int(len(group) * fraction)
+#
+#         group_test = group[:split_point]
+#         group_train = group[split_point:]
+#         return group_test, group_train
+#
+#     grouped = ids.groupby(by)
+#     group_test_lst, group_train_lst = [], []
+#     for name, group in grouped:
+#         g_test, g_train = split_group(group, test_frac)
+#         group_test_lst.append(g_test)
+#         group_train_lst.append(g_train)
+#     test_id = pd.concat(group_test_lst).reset_index(drop=True)
+#     train_id = pd.concat(group_train_lst).reset_index(drop=True)
+#     return test_id, train_id
 
 def make_infer_dataset(rna_hv, screen_num, protein, valid_ratio=0.3):
     match_list_df = rna_hv.obs[[f'match_{screen_num}_largest', 'leiden']].reset_index().rename(columns={'index':'index_x',f'match_{screen_num}_largest':'index_y', 'leiden':'label'})
@@ -295,15 +346,16 @@ def make_infer_dataset(rna_hv, screen_num, protein, valid_ratio=0.3):
     return match_list_df, protein_df, train_dataset, test_dataset
 
 
-def train_infer(train_loader, test_loader, model, criterion, num_epochs, patience, optimizer, batch_size, device, decline_ratio=0.9):
+def train_infer(train_loader, test_loader, model, criterion, num_epochs, patience, optimizer, batch_size, device, decline_ratio=0.9, plot_line=False):
     train_loss_lst, test_loss_lst = [], []
-    print(f'model: {model.name} | lr: {optimizer.param_groups[0]["lr"]} | batch_size: {batch_size}')
+    pbar_epochs = tqdm(range(num_epochs), desc="Training", unit="epoch")
+    # print(f'model: {model.name} | lr: {optimizer.param_groups[0]["lr"]} | batch_size: {batch_size}')
     best_test_loss = float('inf')
     patience_counter = 0
-    for epoch in range(num_epochs):
+    for epoch in pbar_epochs:
         if epoch % 10 == 0:
             optimizer.param_groups[0]['lr'] *= decline_ratio
-            print(f'lr: {optimizer.param_groups[0]["lr"]:.6f}')
+            # print(f'lr: {optimizer.param_groups[0]["lr"]:.6f}')
         train_loss = 0
         for rna_id, protein_tmp, label in train_loader:
             protein_tmp, label = protein_tmp.to(device), label.to(device)
@@ -330,11 +382,15 @@ def train_infer(train_loader, test_loader, model, criterion, num_epochs, patienc
 
         avg_train_loss = train_loss / len(train_loader.dataset)
         avg_test_loss = test_loss / len(test_loader.dataset)
-        print(
-            f'epoch:{epoch}| Train Loss: {train_loss / len(train_loader.dataset)} | Test Loss: {test_loss / len(test_loader.dataset)}', )
+        # print(
+        #     f'epoch:{epoch}| Train Loss: {train_loss / len(train_loader.dataset)} | Test Loss: {test_loss / len(test_loader.dataset)}', )
         train_loss_lst.append(train_loss / len(train_loader.dataset))
         test_loss_lst.append(test_loss / len(test_loader.dataset))
-
+        pbar_epochs.set_postfix({
+            'train_loss': f'{avg_train_loss:.10f}',
+            'test_loss': f'{avg_test_loss:.10f}',
+            'lr': f'{optimizer.param_groups[0]["lr"]:.6f}'
+        })
         if avg_test_loss < best_test_loss:
             best_test_loss = avg_test_loss
             patience_counter = 0
@@ -344,10 +400,12 @@ def train_infer(train_loader, test_loader, model, criterion, num_epochs, patienc
                 print(f'Early stopping at epoch {epoch}. Best Test Loss: {best_test_loss:.6f}')
                 break
         model.train()
+    pbar_epochs.close()
     model.eval()
     loss_df = pd.DataFrame(train_loss_lst, columns=['train_loss'])
     loss_df['test_loss'] = test_loss_lst
-    loss_df.plot()
+    if plot_line:
+        loss_df.plot()
     return model
 
 
