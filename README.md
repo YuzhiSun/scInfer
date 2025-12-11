@@ -13,6 +13,13 @@ Capturing large-scale transcriptomic and proteomic data from individual cells is
 
 ## Environment
 
+#### Option1[recommend]
+We provide more convenient online running examples that can be executed directly through Colab, without the need for local environment setup. Click the Colab icon to directly enter the online runtime environment to run the scInfer demo. 
+<a href="https://colab.research.google.com/github/YuzhiSun/scInfer_colab/blob/main/Unpaired_benchmark_breast.ipynb" target="_parent"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>
+
+#### Option2
+If you want to configure the environment locally, you can follow the configuration methods below.
+
 The running environment of scInfer can be installed from enviornment.yml
 ```
 > conda env create --name env_name -f environment.yml  
