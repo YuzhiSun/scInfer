@@ -7,9 +7,9 @@ Capturing large-scale transcriptomic and proteomic data from individual cells is
 
 Here you can watch our paper presentation video and our code demonstration video:
 
-[A concise overview of the research and key contributions.](https://www.youtube.com/watch?v=fgoBAAjSaQE)
+- [A concise overview of the research and key contributions.](https://www.youtube.com/watch?v=fgoBAAjSaQE)
 
-[A step-by-step demonstration of the algorithm’s functionality and application.](https://www.youtube.com/watch?v=xB3hYK5tTTE)
+- [A step-by-step demonstration of the algorithm’s functionality and application.](https://www.youtube.com/watch?v=xB3hYK5tTTE)
 
 
 
